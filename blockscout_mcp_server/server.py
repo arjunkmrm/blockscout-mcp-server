@@ -3,6 +3,7 @@ from typing import Annotated
 import typer
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from starlette.middleware.cors import CORSMiddleware
 
 from blockscout_mcp_server.constants import (
     BLOCK_TIME_ESTIMATION_RULES,
@@ -128,6 +129,34 @@ def main_command(
         mcp.settings.stateless_http = True  # Enable stateless mode
         mcp.settings.json_response = True  # Enable JSON responses instead of SSE for tool calls
         asgi_app = mcp.streamable_http_app()
+        
+        # Add CORS middleware
+        asgi_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],  # Configure this more restrictively in production
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS", "HEAD"],
+            allow_headers=["*"],
+            expose_headers=["mcp-session-id"],  # Allow client to read session ID
+            max_age=86400,
+        )
+        
+        # Workaround for Starlette Mount trailing slash behavior (issue #869)
+        # https://github.com/encode/starlette/issues/869
+        # Create middleware that modifies the path scope to add trailing slash
+        class MCPPathRedirect:
+            def __init__(self, app):
+                self.app = app
+
+            async def __call__(self, scope, receive, send):
+                if scope.get('type') == 'http' and scope.get('path') == '/mcp':
+                    scope['path'] = '/mcp/'
+                    scope['raw_path'] = b'/mcp/'
+                await self.app(scope, receive, send)
+        
+        # Wrap the app with the middleware
+        asgi_app = MCPPathRedirect(asgi_app)
+        
         uvicorn.run(asgi_app, host=http_host, port=http_port)
     elif rest:
         raise typer.BadParameter("The --rest flag can only be used with the --http flag.")
