@@ -29,4 +29,8 @@ ENV BLOCKSCOUT_NFT_PAGE_SIZE="10"
 ENV BLOCKSCOUT_LOGS_PAGE_SIZE="10"
 ENV BLOCKSCOUT_ADVANCED_FILTERS_PAGE_SIZE="10"
 
-CMD ["python", "-m", "blockscout_mcp_server"]
+# Expose port 8000 for HTTP mode
+EXPOSE 8000
+
+# Run the server in HTTP Streamable mode
+CMD ["python", "-m", "blockscout_mcp_server", "--http", "--http-host", "0.0.0.0", "--http-port", "8000"]
