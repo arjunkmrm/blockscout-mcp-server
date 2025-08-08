@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 import typer
@@ -95,9 +96,16 @@ mcp.tool(structured_output=False)(get_transaction_info)
 mcp.tool(structured_output=False)(get_transaction_logs)
 mcp.tool(structured_output=False)(get_chains_list)
 
+# Log the number of registered tools
+print(f"[INIT] Registered {len(mcp._tools)} MCP tools")
+
 
 # Initialize logging and override the rich formatter defined in the FastMCP
 replace_rich_handlers_with_standard()
+
+# Set up logger for server process
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # Create a Typer application for our CLI
 cli_app = typer.Typer()
@@ -117,20 +125,29 @@ def main_command(
     Use --http and --rest to enable the REST API.
     """
     if http:
+        logger.info(f"[SERVER] Initializing Blockscout MCP Server v{SERVER_VERSION}")
+        logger.info(f"[SERVER] HTTP mode enabled on {http_host}:{http_port}")
+        
         if rest:
+            logger.info("[SERVER] REST API mode enabled")
             print(f"Starting Blockscout MCP Server with REST API on {http_host}:{http_port}")
             from blockscout_mcp_server.api.routes import register_api_routes
 
             register_api_routes(mcp)
+            logger.info("[SERVER] REST API routes registered successfully")
         else:
+            logger.info("[SERVER] HTTP Streamable mode enabled (MCP protocol only)")
             print(f"Starting Blockscout MCP Server in HTTP Streamable mode on {http_host}:{http_port}")
 
         # Configure the existing 'mcp' instance for stateless HTTP with JSON responses
+        logger.info("[SERVER] Configuring MCP for stateless HTTP with JSON responses")
         mcp.settings.stateless_http = True  # Enable stateless mode
         mcp.settings.json_response = True  # Enable JSON responses instead of SSE for tool calls
         asgi_app = mcp.streamable_http_app()
+        logger.info("[SERVER] ASGI app created successfully")
         
         # Add CORS middleware
+        logger.info("[SERVER] Adding CORS middleware with allow_origins=['*']")
         asgi_app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],  # Configure this more restrictively in production
@@ -140,6 +157,7 @@ def main_command(
             expose_headers=["mcp-session-id"],  # Allow client to read session ID
             max_age=86400,
         )
+        logger.info("[SERVER] CORS middleware configured")
         
         # Workaround for Starlette Mount trailing slash behavior (issue #869)
         # https://github.com/encode/starlette/issues/869
@@ -147,21 +165,46 @@ def main_command(
         class MCPPathRedirect:
             def __init__(self, app):
                 self.app = app
+                logger.info("[MIDDLEWARE] MCPPathRedirect middleware initialized")
 
             async def __call__(self, scope, receive, send):
-                if scope.get('type') == 'http' and scope.get('path') == '/mcp':
-                    scope['path'] = '/mcp/'
-                    scope['raw_path'] = b'/mcp/'
+                if scope.get('type') == 'http':
+                    path = scope.get('path', '')
+                    if path == '/mcp':
+                        logger.debug(f"[MIDDLEWARE] Redirecting /mcp to /mcp/ for {scope.get('client', ['unknown'])[0]}")
+                        scope['path'] = '/mcp/'
+                        scope['raw_path'] = b'/mcp/'
+                    elif path == '/':
+                        logger.debug(f"[MIDDLEWARE] Root path accessed from {scope.get('client', ['unknown'])[0]}")
                 await self.app(scope, receive, send)
         
         # Wrap the app with the middleware
+        logger.info("[SERVER] Applying MCPPathRedirect middleware for trailing slash handling")
         asgi_app = MCPPathRedirect(asgi_app)
         
-        uvicorn.run(asgi_app, host=http_host, port=http_port)
+        logger.info(f"[SERVER] Starting Uvicorn server on {http_host}:{http_port}")
+        logger.info("[SERVER] Available endpoints:")
+        logger.info("  - /         : Landing page")
+        logger.info("  - /health   : Health check")
+        logger.info("  - /mcp      : MCP protocol endpoint (JSON-RPC 2.0)")
+        if rest:
+            logger.info("  - /v1/*     : REST API endpoints")
+            logger.info("  - /v1/tools : List all available tools")
+        
+        try:
+            uvicorn.run(asgi_app, host=http_host, port=http_port, log_level="info")
+        except KeyboardInterrupt:
+            logger.info("[SERVER] Received shutdown signal, stopping server...")
+        except Exception as e:
+            logger.error(f"[SERVER] Error starting server: {e}")
+            raise
     elif rest:
+        logger.error("[SERVER] Invalid configuration: --rest flag requires --http flag")
         raise typer.BadParameter("The --rest flag can only be used with the --http flag.")
     else:
         # This is the original behavior: run in stdio mode
+        logger.info(f"[SERVER] Starting Blockscout MCP Server v{SERVER_VERSION} in stdio mode")
+        logger.info("[SERVER] Ready for MCP protocol communication via stdin/stdout")
         mcp.run()
 
 
