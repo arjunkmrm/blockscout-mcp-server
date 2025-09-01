@@ -13,8 +13,3 @@ startCommand:
     type: "object"
     properties: {}
   exampleConfig: {}
-
-# Use environment variables to configure the container at runtime.
-# We set the transport to "http" for the Smithery.ai environment.
-env:
-  BLOCKSCOUT_MCP_TRANSPORT: "http"
