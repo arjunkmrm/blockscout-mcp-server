@@ -44,6 +44,6 @@ EXPOSE 8000
 
 # Set the default transport mode. Can be overridden at runtime with -e.
 # Options: "stdio" (default), "http"
-ENV BLOCKSCOUT_MCP_TRANSPORT="stdio"
+ENV BLOCKSCOUT_MCP_TRANSPORT="http"
 
 CMD ["python", "-m", "blockscout_mcp_server"]
